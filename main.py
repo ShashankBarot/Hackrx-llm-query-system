@@ -5,6 +5,7 @@ import numpy as np
 import requests
 import json
 
+from chunker import process_pdf_and_chunk
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
@@ -21,24 +22,9 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-70b-8192")
 # === Load embedding model ===
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
+
 # === FastAPI app ===
 app = FastAPI()
-
-# === Dummy data for now (will replace with actual chunks later) ===
-document_chunks = [
-    "Knee surgery is covered for insured persons under the age of 60.",
-    "A grace period of 30 days is allowed for premium payment.",
-    "There is a 2-year waiting period for cataract surgery.",
-    "Maternity expenses are covered after 24 months of continuous policy.",
-    "No Claim Discount of 5% is applicable if no claims are made."
-]
-
-# === Embed and index chunks ===
-embeddings = model.encode(document_chunks)
-dim = len(embeddings[0])
-index = faiss.IndexFlatL2(dim)
-index.add(np.array(embeddings).astype('float32'))
-
 # === Request model ===
 class QueryInput(BaseModel):
     documents: str  # not used in dummy mode
@@ -73,15 +59,32 @@ Answer:"""
             }
         )
         result = response.json()
+
+        if "choices" not in result or len(result["choices"]) == 0:
+            return "❌ LLaMA 3 Error: No response received."
+
         return result["choices"][0]["message"]["content"].strip()
+
     except Exception as e:
         return f"❌ LLaMA 3 Error: {e}"
 
 # === Main API Endpoint ===
 @app.post("/hackrx/run")
-def run_query(input: QueryInput):
-    results = []
 
+def run_query(input: QueryInput):
+    # 🔄 Step 1: Get chunks from the PDF blob URL
+    document_chunks = process_pdf_and_chunk(input.documents)
+
+    if not document_chunks:
+        return {"error": "Failed to process PDF or no text extracted."}
+
+    # 🔄 Step 2: Embed all chunks
+    embeddings = model.encode(document_chunks)
+    dim = len(embeddings[0])
+    index = faiss.IndexFlatL2(dim)
+    index.add(np.array(embeddings).astype('float32'))
+
+    results = []
     for question in input.questions:
         query_embedding = model.encode([question])
         D, I = index.search(np.array(query_embedding).astype("float32"), k=3)
