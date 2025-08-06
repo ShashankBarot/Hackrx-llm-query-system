@@ -18,7 +18,7 @@ def extract_text_from_blob_url(blob_url):
         return ""
 
 # Step 2: Chunk text
-def chunk_text(text, max_words=300):
+def chunk_text(text, max_words=600):
     words = text.split()
     chunks = []
     chunk = []
