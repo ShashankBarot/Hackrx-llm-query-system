@@ -1,42 +1,70 @@
-# chunker.py (in-memory, no file saves)
+# chunker.py - In-memory PDF processing without file saves
 
 import fitz  # PyMuPDF
 import requests
 from io import BytesIO
+import logging
 
-# Step 1: Get text from a blob URL (without saving)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def extract_text_from_blob_url(blob_url):
+    """Extract text from PDF URL without saving to disk"""
     try:
-        response = requests.get(blob_url)
+        logger.info(f"Downloading PDF from: {blob_url}")
+        response = requests.get(blob_url, timeout=30)
         response.raise_for_status()
+        
+        # Process PDF in memory
         pdf_bytes = BytesIO(response.content)
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        text = "\n".join([page.get_text() for page in doc])
-        return text
+        
+        text_pages = []
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            text_pages.append(page.get_text())
+        
+        doc.close()
+        full_text = "\n".join(text_pages)
+        
+        logger.info(f"Successfully extracted {len(full_text)} characters from PDF")
+        return full_text
+        
+    except requests.RequestException as e:
+        logger.error(f"Error downloading PDF: {e}")
+        return ""
     except Exception as e:
-        print("❌ PDF text extraction error:", e)
+        logger.error(f"Error extracting text from PDF: {e}")
         return ""
 
-# Step 2: Chunk text
 def chunk_text(text, max_words=300):
+    """Split text into chunks of specified word count"""
+    if not text.strip():
+        return []
+    
     words = text.split()
     chunks = []
-    chunk = []
+    current_chunk = []
 
     for word in words:
-        chunk.append(word)
-        if len(chunk) >= max_words:
-            chunks.append(" ".join(chunk))
-            chunk = []
+        current_chunk.append(word)
+        if len(current_chunk) >= max_words:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = []
 
-    if chunk:
-        chunks.append(" ".join(chunk))
+    # Add remaining words as final chunk
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
 
+    logger.info(f"Text split into {len(chunks)} chunks")
     return chunks
 
-# Combined function
 def process_pdf_from_url(blob_url, chunk_size=300):
+    """Complete pipeline: download PDF, extract text, and create chunks"""
     text = extract_text_from_blob_url(blob_url)
     if not text:
+        logger.warning("No text extracted from PDF")
         return []
+    
     return chunk_text(text, max_words=chunk_size)

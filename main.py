@@ -1,28 +1,60 @@
-# main.py — stateless, lightweight version
+# main.py — HackRx LLM Query System with Groq + LLaMA 3
 
 import os
-import numpy as np
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
-import faiss
 from dotenv import load_dotenv
 from chunker import process_pdf_from_url
 
 load_dotenv()
 
+# Load Groq API credentials
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-70b-8192")
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
-app = FastAPI()
+app = FastAPI(
+    title="HackRx LLM Query System",
+    description="AI-powered PDF document analysis with Groq LLM integration",
+    version="1.0.0"
+)
+
+# Simple text similarity fallback
+def simple_similarity_search(question, chunks, top_k=3):
+    """Simple keyword-based similarity matching"""
+    question_words = set(question.lower().split())
+    scores = []
+    
+    for i, chunk in enumerate(chunks):
+        chunk_words = set(chunk.lower().split())
+        overlap = len(question_words.intersection(chunk_words))
+        scores.append((overlap, i))
+    
+    # Sort by overlap and return top chunks
+    scores.sort(reverse=True)
+    return [chunks[i] for _, i in scores[:top_k]]
 
 class QueryInput(BaseModel):
-    documents: str  # Blob URL
+    documents: str  # PDF URL
     questions: list[str]
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "documents": "https://example.com/document.pdf",
+                "questions": [
+                    "What is the main topic of this document?",
+                    "What are the key findings?",
+                    "Who are the authors?"
+                ]
+            }
+        }
 
 def get_llama3_answer(question, context):
+    """Get answer from Groq LLaMA 3 model"""
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
+    
     prompt = f"""Answer the following question using only the context provided.
 
 Question: {question}
@@ -42,39 +74,69 @@ Answer:"""
             json={
                 "model": GROQ_MODEL,
                 "messages": [
-                    {"role": "system", "content": "You are a helpful assistant for insurance policy understanding."},
+                    {"role": "system", "content": "You are a helpful assistant for document analysis and understanding."},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.3,
-                "max_tokens": 200
+                "max_tokens": 500
             }
         )
+        response.raise_for_status()
         result = response.json()
         return result["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        return f"❌ LLaMA 3 Error: {e}"
+        return f"Error generating answer: {str(e)}"
 
 @app.post("/hackrx/run")
 def run_query(input: QueryInput):
+    """Main endpoint for processing PDF documents and answering questions"""
+    
+    # Process PDF and extract chunks
     chunks = process_pdf_from_url(input.documents)
     if not chunks:
-        return {"error": "❌ Failed to process document or no content found."}
-
-    embeddings = model.encode(chunks)
-    index = faiss.IndexFlatL2(len(embeddings[0]))
-    index.add(np.array(embeddings).astype("float32"))
+        raise HTTPException(
+            status_code=400, 
+            detail="Failed to process document or no content found"
+        )
 
     results = []
     for question in input.questions:
-        q_embedding = model.encode([question])
-        D, I = index.search(np.array(q_embedding).astype("float32"), k=3)
-        matched = [chunks[i] for i in I[0]]
-
+        # Find most relevant chunks
+        matched = simple_similarity_search(question, chunks, top_k=3)
+        
+        # Create context and get answer
         context = "\n".join(matched)
         answer = get_llama3_answer(question, context)
+        
         results.append({
+            "question": question,
             "answer": answer,
-            "justification": "Based on these document chunks:\n- " + "\n- ".join(matched)
+            "justification": "Based on these document chunks:\n- " + "\n- ".join(matched),
+            "chunks_used": len(matched)
         })
 
-    return {"answers": results}
+    return {
+        "status": "success",
+        "document_processed": input.documents,
+        "total_chunks": len(chunks),
+        "answers": results
+    }
+
+@app.get("/")
+def root():
+    """API information endpoint"""
+    return {
+        "message": "HackRx LLM Query System",
+        "version": "1.0.0",
+        "endpoint": "/hackrx/run",
+        "description": "AI-powered PDF document analysis with Groq LLM integration"
+    }
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "HackRx LLM Query System"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5000)
