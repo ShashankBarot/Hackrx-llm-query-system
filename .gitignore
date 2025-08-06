@@ -1,0 +1,11 @@
+# Ignore Python cache and compiled files
+__pycache__/
+*.pyc
+
+# Ignore local data files
+*.pdf
+chunks.json
+data/
+
+# 🔐 Ignore secret keys
+.env
