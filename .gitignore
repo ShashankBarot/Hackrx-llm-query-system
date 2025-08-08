@@ -9,7 +9,3 @@ data/
 
 # 🔐 Ignore secret keys
 .env
-
-# Ignore Replit and Frontend files you don't want to commit
-.replit
-Frontend/
