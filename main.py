@@ -19,39 +19,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Simple text similarity fallback
+# Simple keyword-based fallback search
 def simple_similarity_search(question, chunks, top_k=3):
-    """Simple keyword-based similarity matching"""
     question_words = set(question.lower().split())
     scores = []
-    
     for i, chunk in enumerate(chunks):
         chunk_words = set(chunk.lower().split())
         overlap = len(question_words.intersection(chunk_words))
         scores.append((overlap, i))
-    
-    # Sort by overlap and return top chunks
     scores.sort(reverse=True)
     return [chunks[i] for _, i in scores[:top_k]]
 
+# Request format
 class QueryInput(BaseModel):
-    documents: str  # PDF URL
+    documents: str
     questions: list[str]
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "documents": "https://example.com/document.pdf",
-                "questions": [
-                    "What is the main topic of this document?",
-                    "What are the key findings?",
-                    "Who are the authors?"
-                ]
-            }
-        }
 
 def get_llama3_answer(question, context):
-    """Get answer from Groq LLaMA 3 model"""
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
     
@@ -89,52 +73,32 @@ Answer:"""
 
 @app.post("/hackrx/run")
 def run_query(input: QueryInput):
-    """Main endpoint for processing PDF documents and answering questions"""
-    
-    # Process PDF and extract chunks
     chunks = process_pdf_from_url(input.documents)
     if not chunks:
-        raise HTTPException(
-            status_code=400, 
-            detail="Failed to process document or no content found"
-        )
+        raise HTTPException(status_code=400, detail="Failed to process document or no content found")
 
-    results = []
+    answers = []
     for question in input.questions:
-        # Find most relevant chunks
         matched = simple_similarity_search(question, chunks, top_k=3)
-        
-        # Create context and get answer
         context = "\n".join(matched)
         answer = get_llama3_answer(question, context)
-        
-        results.append({
-            "question": question,
+        answers.append({
             "answer": answer,
-            "justification": "Based on these document chunks:\n- " + "\n- ".join(matched),
-            "chunks_used": len(matched)
+            "justification": "Based on these document chunks:\n- " + "\n- ".join(matched)
         })
 
-    return {
-        "status": "success",
-        "document_processed": input.documents,
-        "total_chunks": len(chunks),
-        "answers": results
-    }
+    return {"answers": answers}
 
 @app.get("/")
 def root():
-    """API information endpoint"""
     return {
         "message": "HackRx LLM Query System",
         "version": "1.0.0",
-        "endpoint": "/hackrx/run",
-        "description": "AI-powered PDF document analysis with Groq LLM integration"
+        "endpoint": "/hackrx/run"
     }
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint"""
     return {"status": "healthy", "service": "HackRx LLM Query System"}
 
 if __name__ == "__main__":
