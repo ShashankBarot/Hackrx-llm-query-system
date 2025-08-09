@@ -101,6 +101,11 @@ def root():
 def health_check():
     return {"status": "healthy", "service": "HackRx LLM Query System"}
 
+# Handle HEAD requests for uptime monitoring
+@app.head("/health")
+def health_check_head():
+    return {}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5000)
