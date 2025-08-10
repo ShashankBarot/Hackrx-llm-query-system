@@ -77,17 +77,24 @@ def run_query(input: QueryInput):
     if not chunks:
         raise HTTPException(status_code=400, detail="Failed to process document or no content found")
 
-    answers = []
+    final_answers = []
+    # Optional: keep justifications internally for debugging
+    debug_info = []
+
     for question in input.questions:
         matched = simple_similarity_search(question, chunks, top_k=3)
         context = "\n".join(matched)
         answer = get_llama3_answer(question, context)
-        answers.append({
+
+        final_answers.append(answer)  # only answer string for output
+        debug_info.append({
+            "question": question,
             "answer": answer,
             "justification": "Based on these document chunks:\n- " + "\n- ".join(matched)
         })
 
-    return {"answers": answers}
+    # Return only list of answers (as per required spec)
+    return {"answers": final_answers}
 
 @app.get("/")
 def root():
