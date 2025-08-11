@@ -82,10 +82,4 @@ curl -X POST http://localhost:8000/hackrx/run \
   -d '{"documents":"https://example.com/your-policy.pdf","questions":["What is covered under AYUSH treatment?"]}'
 ```
 ---
-## ⚠️ Hosting Note
-
-This app is deployed on **Replit**. If it sleeps due to inactivity:
-- Visit the link once in your browser to wake it up
-- Then retry your POST request
----
 ###  Built By : Bit_By_Bit
